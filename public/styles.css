@@ -86,6 +86,16 @@ html,body{margin:0;padding:0;background:#c9ccd4;height:100%}#root{height:100%}
 .post-name{font-size:15px;font-weight:600}.post-name.v{color:var(--weibo)}
 .post-txt{font-size:15px;line-height:1.65;color:#2b2b30}
 .post-foot{display:flex;justify-content:space-between;margin-top:12px;color:var(--txt2);font-size:13px}
+.comment-panel{margin-top:10px;background:#f7f7f9;border-radius:10px;padding:10px}
+.comment-input{display:flex;gap:8px;margin-bottom:8px}
+.comment-input input{flex:1;border:.5px solid var(--line2);border-radius:8px;padding:8px 10px;font-size:13px;background:#fff;outline:none}
+.comment-input button{border:none;background:var(--weibo);color:#fff;border-radius:8px;padding:0 12px;cursor:pointer;font-size:13px}
+.comment-item{display:flex;gap:8px;padding:8px 0;border-top:.5px solid var(--line)}
+.comment-item:first-of-type{border-top:none}
+.comment-user{font-size:12px;font-weight:600;color:#444}
+.comment-text{font-size:13px;line-height:1.45;color:#2b2b30;margin-top:2px}
+.comment-reply{margin-top:6px;padding:6px 8px;border-radius:8px;background:#fff3e0;color:#8a5a00;font-size:12px;line-height:1.4}
+.comment-flip{border:none;background:#fff;border-radius:999px;padding:5px 10px;font-size:12px;color:var(--blue);cursor:pointer;align-self:center}
 .hot{display:flex;align-items:center;gap:11px;padding:13px 16px;background:#fff;cursor:pointer}.hot+.hot{border-top:.5px solid var(--line)}
 .hot-rank{font-size:15px;font-weight:700;width:18px;text-align:center}.hot-rank.top{color:var(--hot)}
 .hot-fire{font-size:10px;background:var(--hot);color:#fff;padding:1px 5px;border-radius:3px;font-weight:600}.hot-fire.new{background:var(--weibo)}
