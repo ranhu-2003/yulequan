@@ -111,18 +111,134 @@ function normalizePost(raw = {}) {
       id: c.id || `${raw.id || Date.now()}-${idx}`,
       user: c.user || "路人",
       text: c.text || "",
-      reply: c.reply || "",
       ts: c.ts || raw.ts || "",
+      replies: Array.isArray(c.replies)
+        ? c.replies.map((r) => ({ from: r.from || "路人", text: r.text || "", ts: r.ts || c.ts || raw.ts || "" }))
+        : (c.reply ? [{ from: "你", text: c.reply, ts: c.ts || raw.ts || "" }] : []),
     })),
   };
 }
 
+function parseTags(text) {
+  if (!text) return [];
+  return String(text).split(/[，,、\s]+/).map((s) => s.trim()).filter(Boolean).slice(0, 8);
+}
+
+function makeWorldHotsearch(playerName) {
+  const topics = [
+    "#北城地铁新线开通首日客流破纪录#",
+    "#国际电影节宣布新增青年单元#",
+    "#知名主持人深夜回应离职传闻#",
+    "#南方暴雨预警升级多地停课#",
+    "#国足公布世预赛大名单#",
+    "#某顶流新剧开机路透曝光#",
+    "#国家博物馆夜场预约人数创新高#",
+    "#AI配音版权新规征求意见#",
+  ];
+  const shuffled = [...topics].sort(() => Math.random() - 0.5).slice(0, 5);
+  return [
+    { rank: 1, title: `#${playerName}出道#`, heat: "新", real: true },
+    ...shuffled.map((title, i) => ({ rank: i + 2, title, heat: i < 1 ? "热" : "", real: true })),
+  ];
+}
+
+function makeDefaultWeiboFeed(player) {
+  const day = todayLabel(1);
+  const studio = normalizePost({
+    id: 1,
+    author: `${player.name} 工作室`,
+    avatar: player.avatar,
+    v: true,
+    text: `#${player.name}出道# 全新旅程，请多指教。`,
+    ts: day,
+    likes: 1280,
+    comments: 2,
+    commentsList: [
+      { id: "seed-1", user: "官方后援会", text: "欢迎新旅程！", ts: day, replies: [] },
+      { id: "seed-2", user: "娱乐观察员", text: "期待后续作品。", ts: day, replies: [] },
+    ],
+  });
+  const industry = normalizePost({
+    id: 2,
+    author: "行业风向标",
+    avatar: "🎬",
+    v: false,
+    text: "某平台公布下半年综艺片单，主持人与艺人跨界合作项目明显增加。",
+    ts: day,
+    likes: 9234,
+    comments: 3,
+    commentsList: [
+      { id: "seed-3", user: "制片助理", text: "主持人赛道确实在回暖。", ts: day, replies: [] },
+      { id: "seed-4", user: "观众甲", text: "希望少点套路剪辑。", ts: day, replies: [] },
+    ],
+  });
+  const society = normalizePost({
+    id: 3,
+    author: "社会新闻速递",
+    avatar: "🛰️",
+    v: false,
+    text: "多地发布高温黄色预警，文旅部门提醒夜间大型活动加强应急保障。",
+    ts: day,
+    likes: 6542,
+    comments: 2,
+    commentsList: [{ id: "seed-5", user: "城市观察", text: "活动主办方要做好防暑。", ts: day, replies: [] }],
+  });
+  return [studio, industry, society];
+}
+
+function createInitialContacts(player) {
+  const today = todayLabel(1);
+  const personalities = ["理性务实", "外柔内刚", "谨慎细致", "直率热心", "情绪稳定", "目标感强"];
+  const backgrounds = [
+    "曾在传统媒体工作，后转型娱乐行业。",
+    "有多年线下执行经验，熟悉行业流程。",
+    "做事强调边界感，习惯先做预案。",
+    "在上一家公司负责过大型活动统筹。",
+    "擅长处理临场突发沟通。",
+  ];
+  const template = [
+    { name: "同事", identity: "同公司同事", opening: `我是你新项目的同组同事，后面多配合。`, relation: "工作往来刚开始，互相观察" },
+    { name: "家人", identity: "家人", opening: "最近节奏快，记得按时吃饭。", relation: "稳定支持你，但担心你太累" },
+    { name: "经纪人", identity: "经纪人", opening: "明天有两个商务沟通，我晚点发你安排。", relation: "合作紧密，正在建立信任" },
+    { name: "助理", identity: "艺人助理", opening: "今天行程单我整理好了，随时改。", relation: "执行默契在建立，日常沟通频繁" },
+  ];
+  return template.map((base, idx) => {
+    const personality = pick(personalities);
+    const bg = pick(backgrounds);
+    return normalizeContact({
+      id: `seed-${Date.now()}-${idx}`,
+      name: base.name,
+      identity: base.identity,
+      avatar: pick(AVATARS),
+      tags: [personality, "可靠"],
+      bio: `${base.identity}。${bg}`,
+      relation: sanitizeRelation(base.relation),
+      opening: base.opening.replace("你", player.name),
+      chat: [],
+      events: [`${today}：初始化联系人档案`],
+      pending: false,
+      unread: idx !== 1,
+    });
+  });
+}
+
 function normalizeState(raw) {
   if (!raw) return null;
+  const player = raw.player || {};
+  const defaultWeibo = makeDefaultWeiboFeed({
+    name: player.name || "艺人",
+    avatar: player.avatar || "🧑‍🎤",
+  });
+  const defaultHot = makeWorldHotsearch(player.name || "艺人");
+  const currentWeibo = (raw.weibo || []).map(normalizePost);
+  const mergedWeibo = currentWeibo.length >= 3 ? currentWeibo : [...currentWeibo, ...defaultWeibo].slice(0, 6);
+  const currentHot = Array.isArray(raw.hotsearch) ? raw.hotsearch : [];
+  const mergedHot = currentHot.length >= 5 ? currentHot : [...currentHot, ...defaultHot].slice(0, 8).map((h, idx) => ({ ...h, rank: idx + 1 }));
   return {
     ...raw,
     npcs: (raw.npcs || []).map(normalizeContact),
-    weibo: (raw.weibo || []).map(normalizePost),
+    weibo: mergedWeibo,
+    hotsearch: mergedHot,
   };
 }
 
@@ -186,7 +302,7 @@ const AVATARS = ["🧑‍🎤","👩‍🎤","🦸","🧛","🧚","💂","🤵",
 const MBTIS = ["INTJ","INTP","ENTJ","ENTP","INFJ","INFP","ENFJ","ENFP","ISTJ","ISFJ","ESTJ","ESFJ","ISTP","ISFP","ESTP","ESFP"];
 const APPEAR = ["清冷禁欲","氧气甜美","浓颜大气","钝感少年","病娇美人","英气飒爽","书卷温润","野性性感"];
 const TALENTS = ["唱跳俱佳","演技派","综艺感强","台词功底","商业头脑","颜值天花板","学霸人设","舞蹈天赋","乐器全能"];
-const DOMAINS = ["演员","流量偶像","唱作歌手","选秀爱豆","综艺咖","导演","编剧","网红博主","模特"];
+const DOMAINS = ["演员","流量偶像","唱作歌手","选秀爱豆","综艺咖","主持人","导演","编剧","网红博主","模特"];
 const FAMILY = ["素人出身","星二代","富商家庭","艺术世家","草根逆袭","落魄豪门","体制内家庭","海外归侨"];
 const GENDERS = ["女","男","非二元"];
 
@@ -380,11 +496,13 @@ function Create({ onDone, onEditApi }) {
   const [f, setF] = useState({ name: "", gender: "女", avatar: "🧑‍🎤", mbti: "INFP", appearance: "清冷禁欲", talent: "演技派", domain: "演员", family: "素人出身", custom: "" });
   const [bio, setBio] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [busyText, setBusyText] = useState("正在撰写人物小传…");
   const [err, setErr] = useState("");
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
 
   async function generate() {
     if (!f.name.trim()) { setErr("先给 Ta 起个名字"); return; }
+    setBusyText("正在撰写人物小传…");
     setBusy(true); setErr("");
     try {
       const out = await callLLM(
@@ -396,31 +514,35 @@ function Create({ onDone, onEditApi }) {
     setBusy(false);
   }
 
-  function start() {
-    onDone({
-      player: { ...f, bio: bio.bio, tags: bio.tags }, npcs: [],
+  async function start() {
+    setBusyText("正在初始化联系人与热搜…");
+    setBusy(true);
+    const player = { ...f, bio: bio.bio, tags: bio.tags };
+    const baseState = normalizeState({
+      player,
+      npcs: [],
       ledger: [{ ts: todayLabel(1), text: `${f.name} 正式出道，进入娱乐圈。` }],
       laws: { 资本干预: "强势主导", 舆论: "一点就炸", 道德容忍: "对劣迹近乎零容忍" },
-      weibo: [normalizePost({
-        id: 1,
-        author: f.name + " 工作室",
-        avatar: f.avatar,
-        v: true,
-        text: `#${f.name}出道# 全新旅程，请多指教。`,
-        ts: todayLabel(1),
-        likes: 1280,
-        comments: 2,
-        commentsList: [
-          { user: "官方后援会", text: "欢迎新旅程！", ts: todayLabel(1) },
-          { user: "娱乐观察员", text: "期待后续作品。", ts: todayLabel(1) },
-        ],
-      })],
-      hotsearch: [{ rank: 1, title: `#${f.name}出道#`, heat: "新", real: true }],
-      day: 1, balance: 50000, tx: [{ t: "签约定金", v: 50000, ts: todayLabel(1) }],
+      weibo: makeDefaultWeiboFeed(player),
+      hotsearch: makeWorldHotsearch(player.name),
+      day: 1,
+      balance: 50000,
+      tx: [{ t: "签约定金", v: 50000, ts: todayLabel(1) }],
     });
+    const seedContacts = createInitialContacts(player);
+    const savedContacts = [];
+    for (const c of seedContacts) {
+      try {
+        savedContacts.push(await createContact(c));
+      } catch {
+        savedContacts.push(c);
+      }
+    }
+    onDone({ ...baseState, npcs: savedContacts });
+    setBusy(false);
   }
 
-  if (busy) return <div className="center-load"><div className="spin" /><div>正在撰写人物小传…</div></div>;
+  if (busy) return <div className="center-load"><div className="spin" /><div>{busyText}</div></div>;
 
   if (bio) return (
     <div className="pad">
@@ -568,6 +690,8 @@ function Weibo({ state, setState, back, flash }) {
   const [composing, setComposing] = useState("");
   const [openCommentsId, setOpenCommentsId] = useState(null);
   const [commentInput, setCommentInput] = useState({});
+  const [flipInput, setFlipInput] = useState({});
+  const [interacting, setInteracting] = useState(false);
 
   function commentCount(post) {
     const list = Array.isArray(post.commentsList) ? post.commentsList : [];
@@ -580,9 +704,36 @@ function Weibo({ state, setState, back, flash }) {
       id: `${Date.now()}-${idx}`,
       user: item.user || `吃瓜网友${idx + 1}`,
       text: item.text || "",
-      reply: "",
       ts: todayLabel(state.day),
+      replies: [],
     })).filter((c) => c.text.trim());
+  }
+
+  async function generateAiCommentsForPost(postId, postText) {
+    const relatedNpc = state.npcs.slice(0, 5).map(n => `${n.name}(${n.identity || "圈内"})`).join("、") || "暂无";
+    try {
+      const out = await callLLM(
+        "你是微博评论生成器。请为一条微博生成2-4条风格不同、现实口吻的中文评论，不要夸张抽象。只返回JSON：{\"comments\":[{\"user\":\"\",\"text\":\"\"}]}",
+        `【微博正文】${postText}\n【玩家】${state.player.name}\n【关联人物】${relatedNpc}`
+      );
+      const aiComments = (out.comments || []).slice(0, 4).map((c, idx) => ({
+        id: `${postId}-ai-${Date.now()}-${idx}`,
+        user: c.user || `网友${idx + 1}`,
+        text: c.text || "",
+        ts: todayLabel(state.day),
+        replies: [],
+      })).filter((c) => c.text.trim());
+      if (!aiComments.length) return;
+      setState(p => ({
+        ...p,
+        weibo: p.weibo.map(post => {
+          if (post.id !== postId) return post;
+          const existing = normalizePost(post);
+          const next = [...existing.commentsList, ...aiComments];
+          return { ...existing, commentsList: next, comments: Math.max(existing.comments || 0, next.length) };
+        }),
+      }));
+    } catch {}
   }
 
   function hasIdentityConflict(npc, text) {
@@ -621,15 +772,16 @@ function Weibo({ state, setState, back, flash }) {
         chat: [...(targetNpc.chat || []), { from: "npc", text: out.wechatMsg }],
         events: eventLine ? [...(targetNpc.events || []), eventLine] : (targetNpc.events || []),
       }) : null;
+      const postId = Date.now();
 
       setState(p => {
         const scope = out.scope === "player" ? "player" : (out.scope === "industry" ? "industry" : "society");
         const newPost = normalizePost({
-          id: Date.now(),
+          id: postId,
           author: out.author || (scope === "player" ? "娱乐圈那点事" : "社会新闻速递"),
           avatar: scope === "player" ? "📰" : (scope === "industry" ? "🎬" : "🛰️"),
           v: false,
-          text: out.weiboPost,
+          text: out.weiboPost || "今日热点引发热议，相关讨论仍在持续。",
           ts: todayLabel(p.day),
           likes: Math.floor(Math.random() * 90000),
           comments: Math.max(Math.floor(Math.random() * 9000), seedComments.length),
@@ -649,21 +801,24 @@ function Weibo({ state, setState, back, flash }) {
         };
       });
       if (syncedTarget) updateContact(syncedTarget).catch(() => {});
+      if (!seedComments.length) generateAiCommentsForPost(postId, out.weiboPost || "");
       flash("🔥 新热搜：" + out.hotSearch);
     } catch (e) { flash("事件生成失败：" + e.message); }
     setBusy(false);
   }
 
-  function post() {
+  async function post() {
     if (!composing.trim()) return;
+    const postId = Date.now();
+    const draftText = composing.trim();
     setState(p => ({
       ...p,
       weibo: [normalizePost({
-        id: Date.now(),
+        id: postId,
         author: p.player.name,
         avatar: p.player.avatar,
         v: true,
-        text: composing,
+        text: draftText,
         ts: todayLabel(p.day),
         likes: 0,
         comments: 0,
@@ -671,47 +826,105 @@ function Weibo({ state, setState, back, flash }) {
       }), ...p.weibo],
     }));
     setComposing("");
+    setOpenCommentsId(postId);
+    await generateAiCommentsForPost(postId, draftText);
     flash("已发布");
   }
 
-  function addComment(postId) {
+  async function addComment(postId) {
     const text = (commentInput[postId] || "").trim();
-    if (!text) return;
+    if (!text || interacting) return;
+    setInteracting(true);
     const nextComment = {
       id: `${postId}-${Date.now()}`,
       user: state.player.name,
       text,
-      reply: "",
       ts: todayLabel(state.day),
+      replies: [],
     };
     setState(p => ({
       ...p,
       weibo: p.weibo.map(post => {
         if (post.id !== postId) return post;
-        const nextList = [...(post.commentsList || []), nextComment];
-        return { ...post, commentsList: nextList, comments: Math.max(post.comments || 0, nextList.length) };
+        const existing = normalizePost(post);
+        const nextList = [...existing.commentsList, nextComment];
+        return { ...existing, commentsList: nextList, comments: Math.max(existing.comments || 0, nextList.length) };
       }),
     }));
     setCommentInput(prev => ({ ...prev, [postId]: "" }));
     setOpenCommentsId(postId);
+    try {
+      const post = state.weibo.find((item) => item.id === postId);
+      const out = await callLLM(
+        "你是微博评论区路人。看到博主评论后，写一句自然的后续回复（8-30字）。只返回JSON：{\"followup\":\"...\"}",
+        `【微博正文】${post?.text || ""}\n【博主】${state.player.name}\n【博主评论】${text}`
+      );
+      const followup = out.followup || "收到，坐等后续。";
+      setState(p => ({
+        ...p,
+        weibo: p.weibo.map(item => {
+          if (item.id !== postId) return item;
+          const existing = normalizePost(item);
+          return {
+            ...existing,
+            commentsList: existing.commentsList.map(c => c.id !== nextComment.id ? c : {
+              ...c,
+              replies: [...(c.replies || []), { from: "网友", text: followup, ts: todayLabel(state.day) }],
+            }),
+          };
+        }),
+      }));
+    } catch {}
+    setInteracting(false);
     flash("评论成功");
   }
 
-  function flipComment(postId, commentId) {
+  async function submitFlipReply(postId, comment) {
+    const text = (flipInput[comment.id] || "").trim();
+    if (!text || interacting) return;
+    setInteracting(true);
     setState(p => ({
       ...p,
       weibo: p.weibo.map(post => {
         if (post.id !== postId) return post;
+        const existing = normalizePost(post);
         return {
-          ...post,
-          commentsList: (post.commentsList || []).map(comment => {
-            if (comment.id !== commentId || comment.reply) return comment;
-            return { ...comment, reply: `${state.player.name}：收到，感谢支持。` };
+          ...existing,
+          commentsList: existing.commentsList.map(c => {
+            if (c.id !== comment.id) return c;
+            return {
+              ...c,
+              replies: [...(c.replies || []), { from: state.player.name, text, ts: todayLabel(state.day) }],
+            };
           }),
         };
       }),
     }));
-    flash("已翻牌");
+    setFlipInput(prev => ({ ...prev, [comment.id]: "" }));
+    try {
+      const post = state.weibo.find((item) => item.id === postId);
+      const out = await callLLM(
+        "你是微博评论者，被博主翻牌回复后，再给一句自然跟进回应。只返回JSON：{\"followup\":\"...\"}",
+        `【微博正文】${post?.text || ""}\n【原评论】${comment.user}：${comment.text}\n【博主翻牌】${state.player.name}：${text}`
+      );
+      const followup = out.followup || "谢谢翻牌，会继续支持。";
+      setState(p => ({
+        ...p,
+        weibo: p.weibo.map(item => {
+          if (item.id !== postId) return item;
+          const existing = normalizePost(item);
+          return {
+            ...existing,
+            commentsList: existing.commentsList.map(c => c.id !== comment.id ? c : {
+              ...c,
+              replies: [...(c.replies || []), { from: comment.user, text: followup, ts: todayLabel(state.day) }],
+            }),
+          };
+        }),
+      }));
+    } catch {}
+    setInteracting(false);
+    flash("已翻牌并收到后续互动");
   }
 
   return (
@@ -744,7 +957,11 @@ function Weibo({ state, setState, back, flash }) {
                     onChange={(e) => setCommentInput(prev => ({ ...prev, [p.id]: e.target.value }))}
                     onKeyDown={(e) => e.key === "Enter" && addComment(p.id)}
                   />
-                  <button onClick={() => addComment(p.id)}>发送</button>
+                  <button onClick={() => addComment(p.id)} disabled={interacting}>发送</button>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                  <div className="muted" style={{ fontSize: 12 }}>评论互动由 AI 驱动</div>
+                  <button className="comment-refresh" onClick={() => generateAiCommentsForPost(p.id, p.text)} disabled={interacting}>AI补充评论</button>
                 </div>
                 {p.commentsList.length === 0 && <div className="muted" style={{ fontSize: 12 }}>暂无评论，来抢首评。</div>}
                 {p.commentsList.map(comment => (
@@ -752,9 +969,21 @@ function Weibo({ state, setState, back, flash }) {
                     <div style={{ flex: 1 }}>
                       <div className="comment-user">{comment.user}</div>
                       <div className="comment-text">{comment.text}</div>
-                      {comment.reply && <div className="comment-reply">{comment.reply}</div>}
+                      {(comment.replies || []).map((reply, idx) => (
+                        <div className="comment-reply" key={`${comment.id}-reply-${idx}`}>
+                          <b>{reply.from}：</b>{reply.text}
+                        </div>
+                      ))}
+                      <div className="flip-box">
+                        <input
+                          value={flipInput[comment.id] || ""}
+                          placeholder="输入翻牌回复…"
+                          onChange={(e) => setFlipInput(prev => ({ ...prev, [comment.id]: e.target.value }))}
+                          onKeyDown={(e) => e.key === "Enter" && submitFlipReply(p.id, comment)}
+                        />
+                        <button onClick={() => submitFlipReply(p.id, comment)} disabled={interacting}>翻牌回复</button>
+                      </div>
                     </div>
-                    {!comment.reply && <button className="comment-flip" onClick={() => flipComment(p.id, comment.id)}>翻牌</button>}
                   </div>
                 ))}
               </div>
@@ -776,6 +1005,8 @@ function Contacts({ state, setState, back, setActive, setScreen, flash }) {
   const [desc, setDesc] = useState("");
   const [draft, setDraft] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({ name: "", identity: "", tags: "", relation: "", bio: "", opening: "" });
 
   function toDraft(out) {
     return normalizeContact({
@@ -798,6 +1029,41 @@ function Contacts({ state, setState, back, setActive, setScreen, flash }) {
       setAdding(false);
       setDraft(null);
       setDesc("");
+    } catch (e) {
+      flash("保存失败：" + e.message);
+    }
+    setBusy(false);
+  }
+
+  function beginEdit(npc) {
+    setEditingId(npc.id);
+    setEditForm({
+      name: npc.name || "",
+      identity: npc.identity || "",
+      tags: (npc.tags || []).join("、"),
+      relation: npc.relation || "",
+      bio: npc.bio || "",
+      opening: npc.opening || "",
+    });
+  }
+
+  async function saveEdit(npc) {
+    if (busy) return;
+    setBusy(true);
+    const updated = normalizeContact({
+      ...npc,
+      name: editForm.name.trim() || npc.name,
+      identity: editForm.identity.trim() || npc.identity,
+      tags: parseTags(editForm.tags),
+      relation: sanitizeRelation(editForm.relation || npc.relation),
+      bio: editForm.bio.trim() || npc.bio,
+      opening: editForm.opening.trim() || npc.opening,
+    });
+    setState(p => ({ ...p, npcs: p.npcs.map(n => n.id === npc.id ? updated : n) }));
+    try {
+      await updateContact(updated);
+      flash("联系人已更新");
+      setEditingId(null);
     } catch (e) {
       flash("保存失败：" + e.message);
     }
@@ -866,9 +1132,30 @@ function Contacts({ state, setState, back, setActive, setScreen, flash }) {
             <div className="av">{n.avatar}</div>
             <div style={{ flex: 1 }}><div className="row-name">{n.name}{n.pending && <span className="pill">待通过</span>}</div><div className="muted" style={{ marginTop: 2, fontSize: 12 }}>身份：{n.identity || "圈内人士"}</div><div style={{ marginTop: 3 }}>{(n.tags || []).map((t, i) => <span className="tag" key={i}>{t}</span>)}</div></div>
             {!n.pending && <span className="nav-act" style={{ color: "var(--green)" }} onClick={() => { setActive(n.id); setScreen("wechat"); }}>私信</span>}
+            <span className="nav-act" style={{ minWidth: 40 }} onClick={() => beginEdit(n)}>编辑</span>
           </div>
           <div className="muted" style={{ marginTop: 9, lineHeight: 1.65 }}>{n.bio}</div>
           <div className="relation">当前关系 · {n.relation}</div>
+          {editingId === n.id && (
+            <div className="profile-card" style={{ marginTop: 12, padding: 12 }}>
+              <label className="label" style={{ marginTop: 0 }}>姓名</label>
+              <input className="input" value={editForm.name} onChange={(e) => setEditForm(p => ({ ...p, name: e.target.value }))} />
+              <label className="label">身份</label>
+              <input className="input" value={editForm.identity} onChange={(e) => setEditForm(p => ({ ...p, identity: e.target.value }))} />
+              <label className="label">标签（逗号或顿号分隔）</label>
+              <input className="input" value={editForm.tags} onChange={(e) => setEditForm(p => ({ ...p, tags: e.target.value }))} />
+              <label className="label">当前关系</label>
+              <input className="input" value={editForm.relation} onChange={(e) => setEditForm(p => ({ ...p, relation: e.target.value }))} />
+              <label className="label">小传</label>
+              <textarea className="area" rows={3} value={editForm.bio} onChange={(e) => setEditForm(p => ({ ...p, bio: e.target.value }))} />
+              <label className="label">开场消息</label>
+              <input className="input" value={editForm.opening} onChange={(e) => setEditForm(p => ({ ...p, opening: e.target.value }))} />
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button className="btn" style={{ flex: 1 }} onClick={() => saveEdit(n)} disabled={busy}>保存修改</button>
+                <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setEditingId(null)}>取消</button>
+              </div>
+            </div>
+          )}
         </div>))}
     </>
   );
@@ -925,8 +1212,57 @@ function Schedule({ state, setState, back, flash }) {
 }
 
 /* ============================================================ PROFILE */
-function Profile({ state, back, setState, openApiSetup }) {
+function Profile({ state, back, setState, openApiSetup, flash }) {
   const p = state.player;
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    name: p.name || "",
+    gender: p.gender || "女",
+    domain: p.domain || "",
+    mbti: p.mbti || "",
+    appearance: p.appearance || "",
+    talent: p.talent || "",
+    family: p.family || "",
+    bio: p.bio || "",
+    tags: (p.tags || []).join("、"),
+  });
+
+  useEffect(() => {
+    setForm({
+      name: p.name || "",
+      gender: p.gender || "女",
+      domain: p.domain || "",
+      mbti: p.mbti || "",
+      appearance: p.appearance || "",
+      talent: p.talent || "",
+      family: p.family || "",
+      bio: p.bio || "",
+      tags: (p.tags || []).join("、"),
+    });
+  }, [p]);
+
+  function saveProfile() {
+    const nextPlayer = {
+      ...p,
+      name: form.name.trim() || p.name,
+      gender: form.gender,
+      domain: form.domain.trim() || p.domain,
+      mbti: form.mbti.trim() || p.mbti,
+      appearance: form.appearance.trim() || p.appearance,
+      talent: form.talent.trim() || p.talent,
+      family: form.family.trim() || p.family,
+      bio: form.bio.trim() || p.bio,
+      tags: parseTags(form.tags),
+    };
+    setState(prev => ({
+      ...prev,
+      player: nextPlayer,
+      ledger: [...prev.ledger, { ts: todayLabel(prev.day), text: "主角手动更新了个人档案信息。" }],
+    }));
+    setEditing(false);
+    flash("个人信息已保存");
+  }
+
   async function reset() {
     if (!confirm("确定重开？当前存档会被清除。")) return;
     try {
@@ -941,10 +1277,36 @@ function Profile({ state, back, setState, openApiSetup }) {
       <div className="nav"><span className="back" onClick={back}>‹ 主屏</span><h2>个人信息</h2><span className="nav-act dim"> </span></div>
       <div className="pad">
         <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}><div className="av" style={{ width: 66, height: 66, fontSize: 34 }}>{p.avatar}</div><div><div style={{ fontSize: 22, fontWeight: 700 }}>{p.name}</div><div className="muted">{p.domain} · {p.mbti} · {p.gender}</div></div></div>
+        {editing && (
+          <div className="profile-card" style={{ marginBottom: 12 }}>
+            <label className="label" style={{ marginTop: 0 }}>姓名</label>
+            <input className="input" value={form.name} onChange={(e) => setForm(v => ({ ...v, name: e.target.value }))} />
+            <label className="label">性别</label>
+            <div className="chips">{GENDERS.map(g => <div key={g} className={"chip" + (form.gender === g ? " on" : "")} onClick={() => setForm(v => ({ ...v, gender: g }))}>{g}</div>)}</div>
+            <label className="label">职业</label>
+            <input className="input" value={form.domain} onChange={(e) => setForm(v => ({ ...v, domain: e.target.value }))} placeholder="例如：主持人" />
+            <label className="label">MBTI</label>
+            <input className="input" value={form.mbti} onChange={(e) => setForm(v => ({ ...v, mbti: e.target.value }))} />
+            <label className="label">外形气质</label>
+            <input className="input" value={form.appearance} onChange={(e) => setForm(v => ({ ...v, appearance: e.target.value }))} />
+            <label className="label">天赋</label>
+            <input className="input" value={form.talent} onChange={(e) => setForm(v => ({ ...v, talent: e.target.value }))} />
+            <label className="label">家庭背景</label>
+            <input className="input" value={form.family} onChange={(e) => setForm(v => ({ ...v, family: e.target.value }))} />
+            <label className="label">标签</label>
+            <input className="input" value={form.tags} onChange={(e) => setForm(v => ({ ...v, tags: e.target.value }))} placeholder="逗号或顿号分隔" />
+            <label className="label">人物小传</label>
+            <textarea className="area" rows={4} value={form.bio} onChange={(e) => setForm(v => ({ ...v, bio: e.target.value }))} />
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <button className="btn" style={{ flex: 1 }} onClick={saveProfile}>保存档案</button>
+              <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setEditing(false)}>取消</button>
+            </div>
+          </div>
+        )}
         <div className="profile-card">
           <div style={{ fontSize: 12, color: "var(--txt2)", letterSpacing: 1, marginBottom: 8 }}>人物小传</div>
           <div style={{ fontSize: 15, lineHeight: 1.85, color: "#2b2b30" }}>{p.bio}</div>
-          <div style={{ marginTop: 12 }}>{p.tags.map((t, i) => <span className="tag" key={i}>{t}</span>)}</div>
+          <div style={{ marginTop: 12 }}>{(p.tags || []).map((t, i) => <span className="tag" key={i}>{t}</span>)}</div>
         </div>
         <div className="stat-grid" style={{ marginTop: 14 }}>
           <div className="stat"><div className="stat-v">{state.day}</div><div className="stat-l">出道天数</div></div>
@@ -956,6 +1318,7 @@ function Profile({ state, back, setState, openApiSetup }) {
         <div className="group"><div className="law-row"><span>资本干预</span><b>{state.laws.资本干预}</b></div><div className="law-row"><span>舆论环境</span><b>{state.laws.舆论}</b></div><div className="law-row"><span>道德容忍</span><b>{state.laws.道德容忍}</b></div></div>
         <label className="label">记忆账本</label>
         <div className="group">{[...state.ledger].reverse().map((l, i) => (<div className="ledger-item" key={i}><span className="ledger-ts">{l.ts}</span>{l.text}</div>))}</div>
+        <button className="btn" style={{ marginTop: 22 }} onClick={() => setEditing(v => !v)}>{editing ? "收起编辑器" : "编辑个人信息"}</button>
         <button className="btn btn-ghost" style={{ marginTop: 22 }} onClick={openApiSetup}>AI 接口设置</button>
         <button className="btn btn-red" style={{ marginTop: 10 }} onClick={reset}>重开人生</button>
       </div>
