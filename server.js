@@ -87,6 +87,7 @@ function normalizeNpc(raw, fallbackId) {
     avatar: raw?.avatar || "🙂",
     bio: raw?.bio || "暂无",
     tags: Array.isArray(raw?.tags) ? raw.tags : [],
+    identity: raw?.identity || raw?.role || "圈内人士",
     relation: raw?.relation || "刚认识",
     opening: raw?.opening || "你好",
     pending: Boolean(raw?.pending),
@@ -102,6 +103,7 @@ function normalizeNpc(raw, fallbackId) {
 function buildNpcMarkdown(raw) {
   const npc = normalizeNpc(raw, raw?.docId);
   const basicInfo = [
+    `- 身份：${npc.identity || "圈内人士"}`,
     `- 头像：${npc.avatar}`,
     `- 标签：${npc.tags.length ? npc.tags.join("、") : "暂无"}`,
     `- 添加状态：${npc.pending ? "待通过好友申请" : "已保存到通讯录"}`,

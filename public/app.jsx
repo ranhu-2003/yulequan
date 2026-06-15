@@ -89,7 +89,40 @@ function normalizeContact(out = {}) {
     tags: Array.isArray(out.tags) ? out.tags : [],
     chat: Array.isArray(out.chat) ? out.chat : [],
     events: Array.isArray(out.events) ? out.events : [],
+    identity: out.identity || out.role || "圈内人士",
     relation: out.relation || "刚认识",
+  };
+}
+
+function sanitizeRelation(raw) {
+  const text = String(raw || "").replace(/\s+/g, "").slice(0, 40);
+  if (!text) return "初识，保持礼貌沟通";
+  if (/(泼|骨相|诅咒|献祭|发癫|中邪|怪谈)/.test(text)) return "有接触，但彼此还在观察";
+  return text;
+}
+
+function normalizePost(raw = {}) {
+  const commentsList = Array.isArray(raw.commentsList) ? raw.commentsList : [];
+  return {
+    ...raw,
+    id: raw.id || Date.now(),
+    comments: Number(raw.comments || 0),
+    commentsList: commentsList.map((c, idx) => ({
+      id: c.id || `${raw.id || Date.now()}-${idx}`,
+      user: c.user || "路人",
+      text: c.text || "",
+      reply: c.reply || "",
+      ts: c.ts || raw.ts || "",
+    })),
+  };
+}
+
+function normalizeState(raw) {
+  if (!raw) return null;
+  return {
+    ...raw,
+    npcs: (raw.npcs || []).map(normalizeContact),
+    weibo: (raw.weibo || []).map(normalizePost),
   };
 }
 
@@ -97,10 +130,7 @@ async function load() {
   try {
     const data = await bootstrap();
     if (!data.state) return null;
-    return {
-      ...data.state,
-      npcs: (data.state.npcs || []).map(normalizeContact),
-    };
+    return normalizeState(data.state);
   } catch {
     return null;
   }
@@ -205,7 +235,7 @@ function App() {
       onDone={(c) => { setApi(c); setAPI(c); saveApi(c); setEditingApi(false); }} /></Frame>
   );
 
-  if (!state) return <Frame><Create onDone={(s) => { setState(s); setScreen("home"); }} onEditApi={() => setEditingApi(true)} /></Frame>;
+  if (!state) return <Frame><Create onDone={(s) => { setState(normalizeState(s)); setScreen("home"); }} onEditApi={() => setEditingApi(true)} /></Frame>;
 
   const unread = state.npcs.filter(n => n.unread).length;
   const pending = state.npcs.filter(n => n.pending).length;
@@ -371,7 +401,20 @@ function Create({ onDone, onEditApi }) {
       player: { ...f, bio: bio.bio, tags: bio.tags }, npcs: [],
       ledger: [{ ts: todayLabel(1), text: `${f.name} 正式出道，进入娱乐圈。` }],
       laws: { 资本干预: "强势主导", 舆论: "一点就炸", 道德容忍: "对劣迹近乎零容忍" },
-      weibo: [{ id: 1, author: f.name + " 工作室", avatar: f.avatar, v: true, text: `#${f.name}出道# 全新旅程，请多指教。`, ts: todayLabel(1), likes: 1280, comments: 342 }],
+      weibo: [normalizePost({
+        id: 1,
+        author: f.name + " 工作室",
+        avatar: f.avatar,
+        v: true,
+        text: `#${f.name}出道# 全新旅程，请多指教。`,
+        ts: todayLabel(1),
+        likes: 1280,
+        comments: 2,
+        commentsList: [
+          { user: "官方后援会", text: "欢迎新旅程！", ts: todayLabel(1) },
+          { user: "娱乐观察员", text: "期待后续作品。", ts: todayLabel(1) },
+        ],
+      })],
       hotsearch: [{ rank: 1, title: `#${f.name}出道#`, heat: "新", real: true }],
       day: 1, balance: 50000, tx: [{ t: "签约定金", v: 50000, ts: todayLabel(1) }],
     });
@@ -479,13 +522,13 @@ function ChatView({ npc, state, setState, onBack, flash }) {
       const recentLedger = state.ledger.slice(-6).map(l => `[${l.ts}] ${l.text}`).join("\n");
       const out = await callLLM(
         `你在中文娱乐圈模拟器里扮演NPC「${npc.name}」。严格依据其人设、标签和与玩家的当前关系说话，语气自然口语化，像真实微信聊天（通常1-3句，可带语气词，可多条短句用换行分隔）。\n关系完全用自然语言理解，不要数字：据小传、标签、当前关系和聊天历史判断此刻该亲近、客套、试探还是疏远；利益捆绑深的即使私下不和也会表面合作；手里有你把柄的会有恃无恐。\n回复后更新一句话「当前关系」（概括此刻真实关系动态，30字内）。若发生重要选择/冲突/交易/承诺则写一条记忆账本摘要，否则memory为null。\n只返回JSON：{"reply":"...","relation":"...","memory":null}`,
-        `【玩家】${state.player.name}（${state.player.domain}）小传：${state.player.bio}\n标签：${state.player.tags.join("、")}\n\n【NPC ${npc.name}】小传：${npc.bio}\n标签：${(npc.tags || []).join("、")}\n当前关系：${npc.relation || "刚认识"}\n\n【近期聊天】\n${recentChat || "（无）"}\n\n【近期事件记忆】\n${recentLedger}\n\n【${state.player.name}刚发来】${message}`
+        `【玩家】${state.player.name}（${state.player.domain}）小传：${state.player.bio}\n标签：${state.player.tags.join("、")}\n\n【NPC ${npc.name}】身份：${npc.identity || "圈内人士"}\n小传：${npc.bio}\n标签：${(npc.tags || []).join("、")}\n当前关系：${npc.relation || "刚认识"}\n\n【近期聊天】\n${recentChat || "（无）"}\n\n【近期事件记忆】\n${recentLedger}\n\n【${state.player.name}刚发来】${message}`
       );
       const memoryEvent = out.memory ? `${todayLabel(state.day)}：${out.memory}` : null;
       const updatedNpc = normalizeContact({
         ...npc,
         chat: [...withMe, { from: "npc", text: out.reply }],
-        relation: out.relation || npc.relation,
+        relation: sanitizeRelation(out.relation || npc.relation),
         events: memoryEvent ? [...(npc.events || []), memoryEvent] : (npc.events || []),
       });
       setState(p => {
@@ -523,31 +566,87 @@ function Weibo({ state, setState, back, flash }) {
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState("发现");
   const [composing, setComposing] = useState("");
+  const [openCommentsId, setOpenCommentsId] = useState(null);
+  const [commentInput, setCommentInput] = useState({});
+
+  function commentCount(post) {
+    const list = Array.isArray(post.commentsList) ? post.commentsList : [];
+    return Math.max(Number(post.comments || 0), list.length);
+  }
+
+  function buildSeedComments(seedComments) {
+    if (!Array.isArray(seedComments)) return [];
+    return seedComments.slice(0, 4).map((item, idx) => ({
+      id: `${Date.now()}-${idx}`,
+      user: item.user || `吃瓜网友${idx + 1}`,
+      text: item.text || "",
+      reply: "",
+      ts: todayLabel(state.day),
+    })).filter((c) => c.text.trim());
+  }
+
+  function hasIdentityConflict(npc, text) {
+    const identity = npc?.identity || "";
+    const merged = String(text || "");
+    if (/粉丝|后援会/.test(identity) && /(抢戏|加戏|拿女主|拿男主|进组拍戏|抢角色)/.test(merged)) return true;
+    if (/营销号|狗仔/.test(identity) && /(主演|导演选角|进组定妆)/.test(merged)) return true;
+    return false;
+  }
 
   async function triggerEvent() {
     setBusy(true);
     try {
-      const sched = pick(SCHEDULES), intv = pick(INTERVENTIONS);
+      const sched = pick(SCHEDULES);
+      const intv = pick(INTERVENTIONS);
       const mem = state.ledger.slice(-6).map(l => `[${l.ts}] ${l.text}`).join("\n");
-      const npcNames = state.npcs.map(n => n.name).join("、") || "（暂无）";
+      const npcProfiles = state.npcs.length
+        ? state.npcs.map(n => `- ${n.name}｜身份:${n.identity || "圈内人士"}｜关系:${n.relation || "未知"}`).join("\n")
+        : "（暂无可用NPC）";
+      const worldMode = Math.random() < 0.45;
+      const sys = worldMode
+        ? `你是娱乐圈模拟器的微博事件引擎。请生成与玩家不直接相关的“行业/社会/国家/其他明星”类虚构新闻，保证像真实热搜。语气自然，信息具体。\n只返回JSON：{"scope":"industry或society","hotSearch":"#带#号的热搜标题#","weiboPost":"一条相关微博正文","author":"发布账号名","fromNpc":null,"wechatMsg":null,"ledger":null,"balanceDelta":0,"seedComments":[{"user":"评论者","text":"评论内容"}]}`
+        : `你是娱乐圈模拟器的微博事件引擎。请围绕玩家生成一个现实、克制、行业逻辑成立的娱乐圈事件。若牵涉已有NPC，必须严格符合其身份边界（例如粉丝不能突然变成抢戏演员）。\n只返回JSON：{"scope":"player","hotSearch":"#带#号的热搜标题#","weiboPost":"一条相关微博正文","author":"发布账号名","fromNpc":"已存在的NPC名或null","wechatMsg":"该NPC发来的微信或null","ledger":"记忆账本一句话摘要或null","balanceDelta":0,"seedComments":[{"user":"评论者","text":"评论内容"}]}`;
       const out = await callLLM(
-        `你是娱乐圈模拟器的事件引擎。依据【当前日程】+【随机干预变量】+【记忆检索】+【社会法则】涌现出一个真实、有张力的娱乐圈突发事件，符合现实行业逻辑，可影射、可反转。\n只返回JSON：{"hotSearch":"#带#号的热搜标题#","weiboPost":"一条相关微博正文","fromNpc":"已存在的NPC名或null","wechatMsg":"该NPC此刻发来的微信或null","ledger":"记忆账本一句话摘要","balanceDelta":0}`,
-        `【玩家】${state.player.name}（${state.player.domain}）标签:${state.player.tags.join("、")}\n【当前日程】${sched}\n【随机干预变量】${intv}\n【社会法则】资本干预:${state.laws.资本干预}；舆论:${state.laws.舆论}；道德容忍:${state.laws.道德容忍}\n【可用NPC】${npcNames}\n【记忆检索】\n${mem}`
+        sys,
+        `【玩家】${state.player.name}（${state.player.domain}）标签:${state.player.tags.join("、")}\n【当前日程】${sched}\n【随机干预变量】${intv}\n【社会法则】资本干预:${state.laws.资本干预}；舆论:${state.laws.舆论}；道德容忍:${state.laws.道德容忍}\n【可用NPC及身份】\n${npcProfiles}\n【记忆检索】\n${mem}`
       );
+
+      const seedComments = buildSeedComments(out.seedComments);
       const eventLine = out.ledger ? `${todayLabel(state.day)}：${out.ledger}` : null;
-      const targetNpc = out.fromNpc && out.wechatMsg ? state.npcs.find(n => n.name === out.fromNpc) : null;
+      let targetNpc = out.fromNpc && out.wechatMsg ? state.npcs.find(n => n.name === out.fromNpc) : null;
+      if (targetNpc && hasIdentityConflict(targetNpc, `${out.wechatMsg || ""}\n${out.weiboPost || ""}`)) targetNpc = null;
       const syncedTarget = targetNpc ? normalizeContact({
         ...targetNpc,
         unread: true,
         chat: [...(targetNpc.chat || []), { from: "npc", text: out.wechatMsg }],
         events: eventLine ? [...(targetNpc.events || []), eventLine] : (targetNpc.events || []),
       }) : null;
+
       setState(p => {
-        const newPost = { id: Date.now(), author: "娱乐圈那点事", avatar: "📰", v: false, text: out.weiboPost, ts: todayLabel(p.day), likes: Math.floor(Math.random() * 90000), comments: Math.floor(Math.random() * 9000) };
+        const scope = out.scope === "player" ? "player" : (out.scope === "industry" ? "industry" : "society");
+        const newPost = normalizePost({
+          id: Date.now(),
+          author: out.author || (scope === "player" ? "娱乐圈那点事" : "社会新闻速递"),
+          avatar: scope === "player" ? "📰" : (scope === "industry" ? "🎬" : "🛰️"),
+          v: false,
+          text: out.weiboPost,
+          ts: todayLabel(p.day),
+          likes: Math.floor(Math.random() * 90000),
+          comments: Math.max(Math.floor(Math.random() * 9000), seedComments.length),
+          commentsList: seedComments,
+        });
         const hot = [{ rank: 1, title: out.hotSearch, heat: "爆", real: true }, ...p.hotsearch.map((h, i) => ({ ...h, rank: i + 2 }))].slice(0, 8);
         let npcs = p.npcs;
         if (syncedTarget) npcs = p.npcs.map(n => n.id === syncedTarget.id ? syncedTarget : n);
-        return { ...p, weibo: [newPost, ...p.weibo], hotsearch: hot, npcs, ledger: out.ledger ? [...p.ledger, { ts: todayLabel(p.day), text: out.ledger }] : p.ledger, balance: p.balance + (out.balanceDelta || 0), tx: out.balanceDelta ? [{ t: "事件影响", v: out.balanceDelta, ts: todayLabel(p.day) }, ...p.tx] : p.tx };
+        return {
+          ...p,
+          weibo: [newPost, ...p.weibo],
+          hotsearch: hot,
+          npcs,
+          ledger: out.ledger ? [...p.ledger, { ts: todayLabel(p.day), text: out.ledger }] : p.ledger,
+          balance: p.balance + (out.balanceDelta || 0),
+          tx: out.balanceDelta ? [{ t: "事件影响", v: out.balanceDelta, ts: todayLabel(p.day) }, ...p.tx] : p.tx,
+        };
       });
       if (syncedTarget) updateContact(syncedTarget).catch(() => {});
       flash("🔥 新热搜：" + out.hotSearch);
@@ -555,7 +654,65 @@ function Weibo({ state, setState, back, flash }) {
     setBusy(false);
   }
 
-  function post() { if (!composing.trim()) return; setState(p => ({ ...p, weibo: [{ id: Date.now(), author: p.player.name, avatar: p.player.avatar, v: true, text: composing, ts: todayLabel(p.day), likes: 0, comments: 0 }, ...p.weibo] })); setComposing(""); flash("已发布"); }
+  function post() {
+    if (!composing.trim()) return;
+    setState(p => ({
+      ...p,
+      weibo: [normalizePost({
+        id: Date.now(),
+        author: p.player.name,
+        avatar: p.player.avatar,
+        v: true,
+        text: composing,
+        ts: todayLabel(p.day),
+        likes: 0,
+        comments: 0,
+        commentsList: [],
+      }), ...p.weibo],
+    }));
+    setComposing("");
+    flash("已发布");
+  }
+
+  function addComment(postId) {
+    const text = (commentInput[postId] || "").trim();
+    if (!text) return;
+    const nextComment = {
+      id: `${postId}-${Date.now()}`,
+      user: state.player.name,
+      text,
+      reply: "",
+      ts: todayLabel(state.day),
+    };
+    setState(p => ({
+      ...p,
+      weibo: p.weibo.map(post => {
+        if (post.id !== postId) return post;
+        const nextList = [...(post.commentsList || []), nextComment];
+        return { ...post, commentsList: nextList, comments: Math.max(post.comments || 0, nextList.length) };
+      }),
+    }));
+    setCommentInput(prev => ({ ...prev, [postId]: "" }));
+    setOpenCommentsId(postId);
+    flash("评论成功");
+  }
+
+  function flipComment(postId, commentId) {
+    setState(p => ({
+      ...p,
+      weibo: p.weibo.map(post => {
+        if (post.id !== postId) return post;
+        return {
+          ...post,
+          commentsList: (post.commentsList || []).map(comment => {
+            if (comment.id !== commentId || comment.reply) return comment;
+            return { ...comment, reply: `${state.player.name}：收到，感谢支持。` };
+          }),
+        };
+      }),
+    }));
+    flash("已翻牌");
+  }
 
   return (
     <>
@@ -566,12 +723,44 @@ function Weibo({ state, setState, back, flash }) {
           <textarea className="area" style={{ background: "#f6f6f8" }} rows={2} placeholder="分享新鲜事…" value={composing} onChange={e => setComposing(e.target.value)} />
           <button className="btn" style={{ marginTop: 9, background: "var(--weibo)" }} onClick={post}>发布</button>
         </div>
-        {state.weibo.map(p => (
+        {state.weibo.map(rawPost => {
+          const p = normalizePost(rawPost);
+          const expanded = openCommentsId === p.id;
+          return (
           <div className="post" key={p.id}>
             <div className="post-hd"><div className="av" style={{ width: 40, height: 40, borderRadius: 20, fontSize: 21 }}>{p.avatar}</div><div><div className={"post-name" + (p.v ? " v" : "")}>{p.author}{p.v && " ✔"}</div><div className="muted" style={{ fontSize: 11 }}>{p.ts}</div></div></div>
             <div className="post-txt">{p.text}</div>
-            <div className="post-foot"><span>↗ 转发</span><span>💬 {p.comments.toLocaleString()}</span><span>♡ {p.likes.toLocaleString()}</span></div>
-          </div>))}
+            <div className="post-foot">
+              <span>↗ 转发</span>
+              <span style={{ cursor: "pointer" }} onClick={() => setOpenCommentsId(expanded ? null : p.id)}>💬 {commentCount(p).toLocaleString()}</span>
+              <span>♡ {p.likes.toLocaleString()}</span>
+            </div>
+            {expanded && (
+              <div className="comment-panel">
+                <div className="comment-input">
+                  <input
+                    value={commentInput[p.id] || ""}
+                    placeholder="写评论…"
+                    onChange={(e) => setCommentInput(prev => ({ ...prev, [p.id]: e.target.value }))}
+                    onKeyDown={(e) => e.key === "Enter" && addComment(p.id)}
+                  />
+                  <button onClick={() => addComment(p.id)}>发送</button>
+                </div>
+                {p.commentsList.length === 0 && <div className="muted" style={{ fontSize: 12 }}>暂无评论，来抢首评。</div>}
+                {p.commentsList.map(comment => (
+                  <div className="comment-item" key={comment.id}>
+                    <div style={{ flex: 1 }}>
+                      <div className="comment-user">{comment.user}</div>
+                      <div className="comment-text">{comment.text}</div>
+                      {comment.reply && <div className="comment-reply">{comment.reply}</div>}
+                    </div>
+                    {!comment.reply && <button className="comment-flip" onClick={() => flipComment(p.id, comment.id)}>翻牌</button>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )})}
       </>}
       {tab === "热搜" && <div className="group" style={{ borderRadius: 0, boxShadow: "none" }}>
         {state.hotsearch.map(h => (<div className="hot" key={h.rank} onClick={triggerEvent}><span className={"hot-rank" + (h.rank <= 3 ? " top" : "")}>{h.rank}</span><span style={{ flex: 1, fontSize: 15 }}>{h.title}</span>{h.heat && <span className={"hot-fire" + (h.heat === "新" ? " new" : "")}>{h.heat}</span>}</div>))}
@@ -591,6 +780,7 @@ function Contacts({ state, setState, back, setActive, setScreen, flash }) {
   function toDraft(out) {
     return normalizeContact({
       ...out,
+      relation: sanitizeRelation(out.relation),
       pending: false,
       unread: false,
       chat: [],
@@ -619,7 +809,7 @@ function Contacts({ state, setState, back, setActive, setScreen, flash }) {
     setBusy(true);
     try {
       const out = await callLLM(
-        `为娱乐圈模拟器生成一个NPC，根据描述输出完整人设。relation用自然语言描述与玩家此刻关系。只返回JSON：{"name":"","avatar":"emoji","bio":"约80字小传","tags":["",""],"relation":"一句话","opening":"主动发来的第一句微信"}`,
+        `你是现实向娱乐圈模拟器的人物编辑。根据用户描述生成一个逻辑自洽、身份明确、行为克制的联系人。\n要求：\n1) 身份必须稳定且现实，不能出现离谱戏剧化表达。\n2) relation 用 12-24 字描述当前关系状态，语言自然、清晰、可理解，不要猎奇比喻。\n3) opening 是一条正常微信开场白。\n只返回JSON：{"name":"","identity":"","avatar":"emoji","bio":"约70-100字小传","tags":["",""],"relation":"一句话","opening":"主动发来的第一句微信"}`,
         `玩家:${state.player.name}（${state.player.domain}）\n人物描述：${desc}`
       );
       setDraft(toDraft(out));
@@ -633,7 +823,7 @@ function Contacts({ state, setState, back, setActive, setScreen, flash }) {
     try {
       const role = pick(NPC_ROLES), vibe = pick(NPC_VIBE), stance = pick(NPC_STANCE);
       const out = await callLLM(
-        `为娱乐圈模拟器随机生成一个有戏剧张力的NPC。relation用自然语言。起一个有记忆点的名字，人设具体、不套话。只返回JSON：{"name":"","avatar":"emoji","bio":"约80字小传","tags":["",""],"relation":"与玩家此刻关系一句话","opening":"主动发来的第一句微信"}`,
+        `为现实向娱乐圈模拟器随机生成一个联系人。要求人物身份明确且可信，避免夸张离奇台词；relation 必须自然、简洁，不要戏谑或神经质表达。\n只返回JSON：{"name":"","identity":"","avatar":"emoji","bio":"约70-100字小传","tags":["",""],"relation":"与玩家此刻关系一句话","opening":"主动发来的第一句微信"}`,
         `玩家:${state.player.name}（${state.player.domain}）标签:${state.player.tags.join("、")}\n请按以下随机种子发挥：角色倾向「${role}」，性格基调「${vibe}」，与玩家关系倾向「${stance}」。`
       );
       setDraft(toDraft(out));
@@ -654,6 +844,7 @@ function Contacts({ state, setState, back, setActive, setScreen, flash }) {
         {draft && (
           <div className="profile-card" style={{ marginTop: 16 }}>
             <div className="row-name">{draft.name}</div>
+            <div className="muted" style={{ marginTop: 4 }}>身份：{draft.identity || "圈内人士"}</div>
             <div style={{ marginTop: 6 }}>{(draft.tags || []).map((t, i) => <span className="tag" key={i}>{t}</span>)}</div>
             <div className="muted" style={{ marginTop: 10, lineHeight: 1.6 }}>{draft.bio}</div>
             <div className="relation">当前关系 · {draft.relation}</div>
@@ -673,7 +864,7 @@ function Contacts({ state, setState, back, setActive, setScreen, flash }) {
         <div key={n.id} style={{ background: "#fff", padding: "14px 16px", borderBottom: "8px solid #f2f2f7" }}>
           <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
             <div className="av">{n.avatar}</div>
-            <div style={{ flex: 1 }}><div className="row-name">{n.name}{n.pending && <span className="pill">待通过</span>}</div><div style={{ marginTop: 3 }}>{(n.tags || []).map((t, i) => <span className="tag" key={i}>{t}</span>)}</div></div>
+            <div style={{ flex: 1 }}><div className="row-name">{n.name}{n.pending && <span className="pill">待通过</span>}</div><div className="muted" style={{ marginTop: 2, fontSize: 12 }}>身份：{n.identity || "圈内人士"}</div><div style={{ marginTop: 3 }}>{(n.tags || []).map((t, i) => <span className="tag" key={i}>{t}</span>)}</div></div>
             {!n.pending && <span className="nav-act" style={{ color: "var(--green)" }} onClick={() => { setActive(n.id); setScreen("wechat"); }}>私信</span>}
           </div>
           <div className="muted" style={{ marginTop: 9, lineHeight: 1.65 }}>{n.bio}</div>
@@ -696,12 +887,12 @@ function Schedule({ state, setState, back, flash }) {
       try {
         const role = pick(NPC_ROLES), stance = pick(NPC_STANCE);
         const out = await callLLM(
-          `为娱乐圈模拟器生成一个主动加玩家微信的新NPC。relation用自然语言。只返回JSON：{"name":"","avatar":"emoji","bio":"约70字小传","tags":[""],"relation":"一句话关系","opening":"申请验证语+加你的理由"}`,
+          `为现实向娱乐圈模拟器生成一个主动加玩家微信的新联系人。必须身份稳定、逻辑真实，不要离谱设定。\n只返回JSON：{"name":"","identity":"","avatar":"emoji","bio":"约70字小传","tags":[""],"relation":"一句话关系","opening":"申请验证语+加你的理由"}`,
           `玩家:${state.player.name}（${state.player.domain}）第${state.day}天刚结束「${today}」。随机种子：角色「${role}」，关系倾向「${stance}」。`
         );
         const pendingNpc = normalizeContact({
           ...out,
-          relation: out.relation || "陌生人",
+          relation: sanitizeRelation(out.relation || "陌生人"),
           pending: true,
           unread: true,
           chat: [],
