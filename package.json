@@ -1,0 +1,9 @@
+{
+  "name": "showbiz-simulator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "娱乐圈模拟器（本地文件持久化版）",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
